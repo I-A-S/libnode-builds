@@ -37,14 +37,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout upstream node (${{ env.NODE_REF }})
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: nodejs/node
           ref: ${{ env.NODE_REF }}
           persist-credentials: false
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -82,6 +82,23 @@ jobs:
             make install DESTDIR="$PWD/dist" PREFIX=/
           fi
 
+      - name: Split debug info (debug only)
+        if: matrix.config == 'debug'
+        run: |
+          mkdir -p dist/debug
+          cd dist/lib
+          # -type f skips the libnode.so symlink and only touches the real ELF.
+          for so in $(find . -maxdepth 1 -type f -name 'libnode.so*'); do
+            base="$(basename "$so")"
+            objcopy --only-keep-debug "$base" "$base.debug"
+            objcopy --strip-debug "$base"
+            objcopy --add-gnu-debuglink="$base.debug" "$base"
+            chmod -x "$base.debug" 2>/dev/null || true
+            mv "$base.debug" "../debug/$base.debug"
+          done
+          echo "Stripped libs:"; ls -lh .
+          echo "Detached symbols:"; ls -lh ../debug
+
       - name: Determine artifact name
         id: name
         run: |
@@ -92,12 +109,20 @@ jobs:
           fi
 
       - name: Upload platform artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.name.outputs.name }}
           path: |
             dist/bin
             dist/lib
+          if-no-files-found: error
+
+      - name: Upload debug symbols artifact (debug only)
+        if: matrix.config == 'debug'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ steps.name.outputs.name }}-symbols
+          path: dist/debug
           if-no-files-found: error
 
       - name: Stage headers (linux x64 release only)
@@ -106,7 +131,7 @@ jobs:
 
       - name: Upload headers artifact
         if: matrix.arch == 'x64' && matrix.config == 'release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: headers
           path: |
@@ -123,14 +148,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout upstream node (${{ env.NODE_REF }})
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: nodejs/node
           ref: ${{ env.NODE_REF }}
           persist-credentials: false
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -177,7 +202,7 @@ jobs:
           fi
 
       - name: Upload platform artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.name.outputs.name }}
           path: |
@@ -190,19 +215,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x64, arm64]
-        config: [release, debug]
-    runs-on: windows-2022
+        include:
+          - { arch: x64,   runner: windows-2022,   config: release }
+          - { arch: x64,   runner: windows-2022,   config: debug }
+          - { arch: arm64, runner: windows-11-arm, config: release }
+          - { arch: arm64, runner: windows-11-arm, config: debug }
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout upstream node (${{ env.NODE_REF }})
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: nodejs/node
           ref: ${{ env.NODE_REF }}
           persist-credentials: false
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -259,7 +287,7 @@ jobs:
           "path=$stage"     | Out-File -Append -FilePath $env:GITHUB_OUTPUT
 
       - name: Upload platform artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.stage.outputs.name }}
           path: ${{ steps.stage.outputs.path }}
@@ -274,7 +302,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout upstream node (for version)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: nodejs/node
           ref: ${{ env.NODE_REF }}
@@ -289,7 +317,7 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: dist
 
@@ -304,7 +332,7 @@ jobs:
           ls -l
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: libnode ${{ steps.tag.outputs.version }}
