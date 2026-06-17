@@ -192,7 +192,7 @@ jobs:
       matrix:
         arch: [x64, arm64]
         config: [release, debug]
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - name: Checkout upstream node (${{ env.NODE_REF }})
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
