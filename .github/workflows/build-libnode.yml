@@ -1,0 +1,313 @@
+name: Build libnode shared
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.13'
+  NODE_REF: 'v22.x'
+
+jobs:
+  linux:
+    name: linux-${{ matrix.arch }}-${{ matrix.config }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            config: release
+          - runner: ubuntu-24.04
+            arch: x64
+            config: debug
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            config: release
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            config: debug
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout upstream node (${{ env.NODE_REF }})
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        with:
+          repository: nodejs/node
+          ref: ${{ env.NODE_REF }}
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Environment information
+        run: |
+          uname -a
+          gcc --version
+          g++ --version
+          python3 --version
+
+      - name: Configure (${{ matrix.config }})
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            ./configure --shared --debug
+          else
+            ./configure --shared
+          fi
+
+      - name: Build (${{ matrix.config }})
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            make -C out BUILDTYPE=Debug -j"$(nproc)" V=1
+          else
+            make -j"$(nproc)" V=1
+          fi
+
+      - name: Install to dist tree
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            python3 tools/install.py install \
+              --dest-dir "$PWD/dist" \
+              --prefix / \
+              --build-dir out/Debug
+          else
+            make install DESTDIR="$PWD/dist" PREFIX=/
+          fi
+
+      - name: Determine artifact name
+        id: name
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            echo "name=node-linux-${{ matrix.arch }}-dbg" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=node-linux-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: |
+            dist/bin
+            dist/lib
+          if-no-files-found: error
+
+      - name: Stage headers (linux x64 release only)
+        if: matrix.arch == 'x64' && matrix.config == 'release'
+        run: cp LICENSE dist/LICENSE
+
+      - name: Upload headers artifact
+        if: matrix.arch == 'x64' && matrix.config == 'release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        with:
+          name: headers
+          path: |
+            dist/include
+            dist/LICENSE
+          if-no-files-found: error
+
+  macos:
+    name: darwin-arm64-${{ matrix.config }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [release, debug]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout upstream node (${{ env.NODE_REF }})
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        with:
+          repository: nodejs/node
+          ref: ${{ env.NODE_REF }}
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Environment information
+        run: |
+          uname -a
+          clang --version
+          python3 --version
+
+      - name: Configure (${{ matrix.config }})
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            ./configure --shared --debug
+          else
+            ./configure --shared
+          fi
+
+      - name: Build (${{ matrix.config }})
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            make -C out BUILDTYPE=Debug -j"$(sysctl -n hw.ncpu)" V=1
+          else
+            make -j"$(sysctl -n hw.ncpu)" V=1
+          fi
+
+      - name: Install to dist tree
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            python3 tools/install.py install \
+              --dest-dir "$PWD/dist" \
+              --prefix / \
+              --build-dir out/Debug
+          else
+            make install DESTDIR="$PWD/dist" PREFIX=/
+          fi
+
+      - name: Determine artifact name
+        id: name
+        run: |
+          if [ "${{ matrix.config }}" = "debug" ]; then
+            echo "name=darwin-arm64-dbg" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=darwin-arm64" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: |
+            dist/bin
+            dist/lib
+          if-no-files-found: error
+
+  windows:
+    name: win-${{ matrix.arch }}-${{ matrix.config }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        config: [release, debug]
+    runs-on: windows-2025
+    steps:
+      - name: Checkout upstream node (${{ env.NODE_REF }})
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        with:
+          repository: nodejs/node
+          ref: ${{ env.NODE_REF }}
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Patch gen_node_def for cross-compile (node.gyp)
+        shell: pwsh
+        run: |
+          $gyp = "node.gyp"
+          $c = Get-Content $gyp -Raw
+          $pattern = "('target_name':\s*'gen_node_def',\s*'type':\s*'executable',)"
+          $replacement = "`$1`n         'toolsets': ['host'],"
+          $patched = [regex]::Replace($c, $pattern, $replacement, 1)
+          if ($patched -eq $c) { throw "gen_node_def patch did not apply -- upstream node.gyp shape changed" }
+          Set-Content $gyp $patched -NoNewline
+
+      - name: Install NASM (x64 only)
+        if: matrix.arch == 'x64'
+        run: choco install -y nasm
+
+      - name: Environment information
+        run: npx envinfo
+
+      - name: Install Rust ARM64 target
+        run: rustup target add aarch64-pc-windows-msvc
+
+      - name: Build libnode (${{ matrix.config }} ${{ matrix.arch }})
+        shell: cmd
+        run: |
+          if /i "${{ matrix.config }}" == "debug" (
+            call vcbuild.bat debug dll ${{ matrix.arch }}
+          ) else (
+            call vcbuild.bat dll ${{ matrix.arch }}
+          )
+
+      - name: Stage files
+        id: stage
+        shell: pwsh
+        run: |
+          $arch = "${{ matrix.arch }}"
+          $config = "${{ matrix.config }}"
+          $srcDir = if ($config -eq "debug") { "Debug" } else { "Release" }
+          $base = if ($config -eq "debug") { "node-win-$arch-dbg" } else { "node-win-$arch" }
+
+          $stage = Join-Path $env:GITHUB_WORKSPACE "stage\$base"
+          New-Item -ItemType Directory -Path (Join-Path $stage "bin") -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $stage "lib") -Force | Out-Null
+
+          Copy-Item (Join-Path $srcDir "libnode.dll") (Join-Path $stage "bin\libnode.dll")
+          if (Test-Path (Join-Path $srcDir "node.exe")) {
+            Copy-Item (Join-Path $srcDir "node.exe") (Join-Path $stage "bin\node.exe")
+          }
+          Copy-Item (Join-Path $srcDir "libnode.lib") (Join-Path $stage "lib\libnode.lib")
+
+          "name=$base"      | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+          "path=$stage"     | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: ${{ steps.stage.outputs.path }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [linux, macos, windows]
+    if: ${{ always() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout upstream node (for version)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  
+        with:
+          repository: nodejs/node
+          ref: ${{ env.NODE_REF }}
+          path: nodesrc
+          persist-credentials: false
+
+      - name: Determine version tag
+        id: tag
+        run: |
+          version="$(python3 nodesrc/tools/getnodeversion.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  
+        with:
+          path: dist
+
+      - name: Zip each artifact (single level)
+        run: |
+          cd dist
+          shopt -s nullglob
+          for d in */; do
+            name="${d%/}"
+            ( cd "$name" && zip -ry "../$name.zip" . )
+          done
+          ls -l
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: libnode ${{ steps.tag.outputs.version }}
+          files: dist/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
