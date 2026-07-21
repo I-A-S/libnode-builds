@@ -230,6 +230,8 @@ jobs:
           fi
 
       - name: Upload platform artifact
+        id: upload-platform
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.name.outputs.name }}
@@ -237,6 +239,21 @@ jobs:
             dist/bin
             dist/lib
           if-no-files-found: error
+
+      - name: Wait before artifact upload retry
+        if: steps.upload-platform.outcome == 'failure'
+        run: sleep 20
+
+      - name: Retry platform artifact upload
+        if: steps.upload-platform.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: |
+            dist/bin
+            dist/lib
+          if-no-files-found: error
+          overwrite: true
 
   windows:
     name: win-${{ matrix.arch }}-${{ matrix.config }}
