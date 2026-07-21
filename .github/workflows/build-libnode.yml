@@ -140,12 +140,24 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: darwin-arm64-${{ matrix.config }}
+    name: darwin-${{ matrix.arch }}-${{ matrix.config }}
     strategy:
       fail-fast: false
       matrix:
-        config: [release, debug]
-    runs-on: macos-latest
+        include:
+          - runner: macos-15
+            arch: arm64
+            config: release
+          - runner: macos-15
+            arch: arm64
+            config: debug
+          - runner: macos-15-intel
+            arch: x64
+            config: release
+          - runner: macos-15-intel
+            arch: x64
+            config: debug
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout upstream node (${{ env.NODE_REF }})
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -162,8 +174,24 @@ jobs:
       - name: Environment information
         run: |
           uname -a
+          uname -m
           clang --version
           python3 --version
+
+      - name: Verify runner architecture
+        run: |
+          actual="$(uname -m)"
+
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            expected="x86_64"
+          else
+            expected="arm64"
+          fi
+
+          if [ "$actual" != "$expected" ]; then
+            echo "Expected architecture $expected, but runner reports $actual"
+            exit 1
+          fi
 
       - name: Configure (${{ matrix.config }})
         run: |
@@ -196,9 +224,9 @@ jobs:
         id: name
         run: |
           if [ "${{ matrix.config }}" = "debug" ]; then
-            echo "name=darwin-arm64-dbg" >> "$GITHUB_OUTPUT"
+            echo "name=darwin-${{ matrix.arch }}-dbg" >> "$GITHUB_OUTPUT"
           else
-            echo "name=darwin-arm64" >> "$GITHUB_OUTPUT"
+            echo "name=darwin-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload platform artifact
